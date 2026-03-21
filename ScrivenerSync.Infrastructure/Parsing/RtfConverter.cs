@@ -6,8 +6,15 @@ namespace ScrivenerSync.Infrastructure.Parsing;
 
 public class RtfConverter
 {
+    static RtfConverter()
+    {
+        // RtfPipe requires Windows-1252 which is not included in .NET by default.
+        // Registering CodePagesEncodingProvider makes all legacy encodings available.
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+    }
+
     /// <summary>
-    /// Returns the expected path to a Scrivener document's RTF file.
+    /// Returns the expected path to a Scrivener document RTF file.
     /// </summary>
     public string GetContentPath(string scrivFolderPath, string uuid) =>
         Path.Combine(scrivFolderPath, "Files", "Data", uuid, "content.rtf");
@@ -31,8 +38,8 @@ public class RtfConverter
         if (rtfBytes.Length == 0)
             return null;
 
-        var html  = ConvertRtfToHtml(rtfBytes);
-        var hash  = ComputeHash(rtfBytes);
+        var html = ConvertRtfToHtml(rtfBytes);
+        var hash = ComputeHash(rtfBytes);
 
         return new RtfConversionResult
         {
