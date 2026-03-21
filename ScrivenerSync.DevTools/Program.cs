@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text;
 using ScrivenerSync.Domain.Interfaces.Services;
 using ScrivenerSync.Infrastructure.Parsing;
@@ -9,6 +10,8 @@ using ScrivenerSync.Infrastructure.Parsing;
 var scrivPath = args.Length > 0
     ? args[0]
     : @"C:\Users\alast\Dropbox\Apps\Scrivener\Test.scriv";
+
+var openBrowser = !args.Contains("--no-browser");
 
 Console.OutputEncoding = Encoding.UTF8;
 
@@ -92,67 +95,29 @@ Console.WriteLine($"  Documents   : {documents}");
 Console.WriteLine();
 
 // ---------------------------------------------------------------------------
-// Step 5: Convert first document node to HTML
+// Step 5: Batch conversion + HTML preview files
 // ---------------------------------------------------------------------------
-Banner("Step 5: RTF conversion (first Document node)");
-
-var firstDoc = allNodes.FirstOrDefault(n => n.NodeType == ParsedNodeType.Document);
-if (firstDoc is null)
-{
-    Console.WriteLine("  No document nodes found.");
-}
-else
-{
-    Console.WriteLine($"  Converting: {firstDoc.Title} ({firstDoc.Uuid})");
-    try
-    {
-        var converter = new RtfConverter();
-        var result    = await converter.ConvertAsync(scrivPath, firstDoc.Uuid);
-
-        if (result is null)
-        {
-            Console.WriteLine("  No content.rtf found for this node (empty document).");
-        }
-        else
-        {
-            Success("Converted successfully.");
-            Console.WriteLine($"  Hash : {result.Hash}");
-            Console.WriteLine($"  HTML ({result.Html.Length} chars):");
-            Console.WriteLine();
-
-            var preview = result.Html.Length > 800
-                ? result.Html[..800] + "..."
-                : result.Html;
-            Console.ForegroundColor = ConsoleColor.DarkCyan;
-            Console.WriteLine(preview);
-            Console.ResetColor();
-        }
-    }
-    catch (Exception ex)
-    {
-        Error($"Conversion failed: {ex.Message}");
-    }
-}
-
-Console.WriteLine();
-
-// ---------------------------------------------------------------------------
-// Step 6: Batch conversion summary
-// ---------------------------------------------------------------------------
-Banner("Step 6: Batch conversion summary");
+Banner("Step 5: Batch conversion and HTML preview");
 Console.WriteLine($"  Converting {documents} document node(s)...");
 Console.WriteLine();
 
-var converter2   = new RtfConverter();
+var converter    = new RtfConverter();
 var successCount = 0;
 var emptyCount   = 0;
 var failCount    = 0;
+var previewFiles = new List<(string Title, string FilePath)>();
+
+var tempDir = Path.Combine(Path.GetTempPath(), "ScrivenerSyncPreview");
+Directory.CreateDirectory(tempDir);
+
+foreach (var old in Directory.GetFiles(tempDir, "*.html"))
+    File.Delete(old);
 
 foreach (var doc in allNodes.Where(n => n.NodeType == ParsedNodeType.Document))
 {
     try
     {
-        var result = await converter2.ConvertAsync(scrivPath, doc.Uuid);
+        var result = await converter.ConvertAsync(scrivPath, doc.Uuid);
         if (result is null)
         {
             emptyCount++;
@@ -162,6 +127,12 @@ foreach (var doc in allNodes.Where(n => n.NodeType == ParsedNodeType.Document))
         {
             successCount++;
             Console.WriteLine($"  [OK    ] {doc.Title} - {result.Html.Length} chars, hash: {result.Hash[..12]}...");
+
+            var safeName = string.Concat(doc.Title.Split(Path.GetInvalidFileNameChars()));
+            var fileName = $"{successCount:D2}_{safeName}.html";
+            var filePath = Path.Combine(tempDir, fileName);
+            await File.WriteAllTextAsync(filePath, BuildPreviewPage(doc.Title, result.Html), Encoding.UTF8);
+            previewFiles.Add((doc.Title, filePath));
         }
     }
     catch (Exception ex)
@@ -179,12 +150,113 @@ Console.WriteLine($"  Empty     : {emptyCount}");
 Console.WriteLine($"  Failed    : {failCount}");
 Console.WriteLine();
 
+// ---------------------------------------------------------------------------
+// Step 6: Write index page and open in browser
+// ---------------------------------------------------------------------------
+if (previewFiles.Count > 0)
+{
+    Banner("Step 6: Browser preview");
+
+    var indexPath = Path.Combine(tempDir, "00_index.html");
+    await File.WriteAllTextAsync(indexPath, BuildIndexPage(previewFiles), Encoding.UTF8);
+
+    Console.WriteLine($"  Preview files written to:");
+    Console.WriteLine($"  {tempDir}");
+    Console.WriteLine();
+
+    if (openBrowser)
+    {
+        Console.WriteLine("  Opening index in default browser...");
+        Process.Start(new ProcessStartInfo { FileName = indexPath, UseShellExecute = true });
+        Success("Browser opened.");
+    }
+    else
+    {
+        Console.WriteLine($"  Open manually: {indexPath}");
+    }
+}
+
+Console.WriteLine();
+
 if (failCount == 0)
     Success("All conversions completed without errors.");
 else
     Error($"{failCount} conversion(s) failed.");
 
 return failCount > 0 ? 1 : 0;
+
+// ---------------------------------------------------------------------------
+// HTML builders - using string concatenation to avoid raw string brace issues
+// ---------------------------------------------------------------------------
+
+string BuildPreviewPage(string title, string bodyHtml)
+{
+    var encoded = System.Net.WebUtility.HtmlEncode(title);
+    var sb = new StringBuilder();
+    sb.AppendLine("<!DOCTYPE html>");
+    sb.AppendLine("<html lang=\"en\">");
+    sb.AppendLine("<head>");
+    sb.AppendLine("  <meta charset=\"UTF-8\">");
+    sb.AppendLine("  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">");
+    sb.AppendLine($"  <title>{encoded}</title>");
+    sb.AppendLine("  <style>");
+    sb.AppendLine("    body { font-family: Georgia, 'Times New Roman', serif; font-size: 16px;");
+    sb.AppendLine("           line-height: 1.8; max-width: 720px; margin: 60px auto;");
+    sb.AppendLine("           padding: 0 24px; color: #1a1a1a; background: #fafaf8; }");
+    sb.AppendLine("    h1   { font-size: 1.2em; font-weight: normal; color: #666;");
+    sb.AppendLine("           border-bottom: 1px solid #ddd; padding-bottom: 12px; margin-bottom: 32px; }");
+    sb.AppendLine("    p    { margin: 0 0 1em 0; text-indent: 0 !important; }");
+    sb.AppendLine("    div  { font-family: Georgia, serif !important;");
+    sb.AppendLine("           font-size: 16px !important; }");
+    sb.AppendLine("    a.back { display: block; margin-top: 48px; color: #888;");
+    sb.AppendLine("             font-size: 0.85em; text-decoration: none; }");
+    sb.AppendLine("    a.back:hover { color: #333; }");
+    sb.AppendLine("  </style>");
+    sb.AppendLine("</head>");
+    sb.AppendLine("<body>");
+    sb.AppendLine($"  <h1>{encoded}</h1>");
+    sb.AppendLine("  <div class=\"content\">");
+    sb.AppendLine(bodyHtml);
+    sb.AppendLine("  </div>");
+    sb.AppendLine("  <a class=\"back\" href=\"00_index.html\">&larr; Back to index</a>");
+    sb.AppendLine("</body>");
+    sb.AppendLine("</html>");
+    return sb.ToString();
+}
+
+string BuildIndexPage(List<(string Title, string FilePath)> files)
+{
+    var sb = new StringBuilder();
+    sb.AppendLine("<!DOCTYPE html>");
+    sb.AppendLine("<html lang=\"en\">");
+    sb.AppendLine("<head>");
+    sb.AppendLine("  <meta charset=\"UTF-8\">");
+    sb.AppendLine("  <title>ScrivenerSync Preview</title>");
+    sb.AppendLine("  <style>");
+    sb.AppendLine("    body { font-family: Georgia, serif; max-width: 600px;");
+    sb.AppendLine("           margin: 60px auto; padding: 0 24px;");
+    sb.AppendLine("           background: #fafaf8; color: #1a1a1a; }");
+    sb.AppendLine("    h1   { font-size: 1.4em; border-bottom: 1px solid #ddd; padding-bottom: 12px; }");
+    sb.AppendLine("    ul   { list-style: none; padding: 0; }");
+    sb.AppendLine("    li   { margin: 12px 0; }");
+    sb.AppendLine("    a    { color: #2a6496; text-decoration: none; font-size: 1.05em; }");
+    sb.AppendLine("    a:hover { text-decoration: underline; }");
+    sb.AppendLine("  </style>");
+    sb.AppendLine("</head>");
+    sb.AppendLine("<body>");
+    sb.AppendLine("  <h1>ScrivenerSync - Scene Preview</h1>");
+    sb.AppendLine("  <ul>");
+    foreach (var (title, filePath) in files)
+    {
+        var fileName = Path.GetFileName(filePath);
+        var encoded  = System.Net.WebUtility.HtmlEncode(title);
+        sb.AppendLine($"    <li><a href=\"{fileName}\">{encoded}</a></li>");
+    }
+    sb.AppendLine("  </ul>");
+    sb.AppendLine("</body>");
+    sb.AppendLine("</html>");
+    return sb.ToString();
+}
 
 // ---------------------------------------------------------------------------
 // Helper functions
