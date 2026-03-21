@@ -30,10 +30,12 @@ public class UserTests
     [InlineData(null)]
     [InlineData("")]
     [InlineData("   ")]
-    public void Create_WithInvalidEmail_ThrowsInvariantViolationException(string email)
+    public void Create_WithInvalidEmail_ThrowsInvariantViolationException(string? email)
     {
+#pragma warning disable CS8604
         var ex = Assert.Throws<InvariantViolationException>(
             () => User.Create(email, "Test User", Role.BetaReader));
+#pragma warning restore CS8604
 
         Assert.Equal("I-EMAIL", ex.InvariantCode);
     }
@@ -42,10 +44,12 @@ public class UserTests
     [InlineData(null)]
     [InlineData("")]
     [InlineData("   ")]
-    public void Create_WithInvalidDisplayName_ThrowsInvariantViolationException(string displayName)
+    public void Create_WithInvalidDisplayName_ThrowsInvariantViolationException(string? displayName)
     {
+#pragma warning disable CS8604
         var ex = Assert.Throws<InvariantViolationException>(
             () => User.Create("test@example.com", displayName, Role.BetaReader));
+#pragma warning restore CS8604
 
         Assert.Equal("I-DISPLAYNAME", ex.InvariantCode);
     }
