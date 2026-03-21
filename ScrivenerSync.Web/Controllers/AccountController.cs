@@ -7,7 +7,6 @@ namespace ScrivenerSync.Web.Controllers;
 
 public class AccountController(
     SignInManager<IdentityUser> signInManager,
-    UserManager<IdentityUser> userManager,
     ILogger<AccountController> logger) : Controller
 {
     [HttpGet]
@@ -64,3 +63,4 @@ public class AccountController(
         return RedirectToAction("Index", "Home");
     }
 }
+

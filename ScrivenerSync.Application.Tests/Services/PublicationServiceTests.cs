@@ -9,46 +9,63 @@ namespace ScrivenerSync.Application.Tests.Services;
 
 public class PublicationServiceTests
 {
-    private readonly Mock<ISectionRepository>          _sectionRepo = new();
-        private readonly Mock<IUnitOfWork>                 _unitOfWork  = new();
+    private readonly Mock<ISectionRepository> _sectionRepo = new();
+    private readonly Mock<IUnitOfWork>        _unitOfWork  = new();
 
-    private PublicationService CreateSut() => new(_sectionRepo.Object, _unitOfWork.Object);
+    private PublicationService CreateSut() => new(
+        _sectionRepo.Object,
+        _unitOfWork.Object);
 
-    private static Section MakeDocument(Guid projectId, bool published = false)
-    {
-        var s = Section.CreateDocument(projectId, Guid.NewGuid().ToString(),
-            "Scene 1", null, 0, "<p>Content</p>", "hash123", "First Draft");
-        if (published) s.Publish("hash123");
-        return s;
-    }
+    private static Section MakeChapter(Guid projectId) =>
+        Section.CreateFolder(projectId, Guid.NewGuid().ToString(), "Chapter 1", null, 0);
 
-    private static User MakeAuthor() =>
-        User.Create("author@example.com", "Author", Role.Author);
+    private static Section MakeScene(Guid projectId, Guid chapterId, string status) =>
+        Section.CreateDocument(projectId, Guid.NewGuid().ToString(),
+            "Scene 1", chapterId, 0, "<p>x</p>", "hash", status);
 
     // ---------------------------------------------------------------------------
-    // Publish
+    // PublishChapter
     // ---------------------------------------------------------------------------
 
     [Fact]
-    public async Task PublishAsync_ValidDocument_SetsIsPublished()
+    public async Task PublishChapterAsync_AllScenesReady_PublishesAll()
     {
         var projectId = Guid.NewGuid();
-        var author    = MakeAuthor();
-        var section   = MakeDocument(projectId);
+        var chapter   = MakeChapter(projectId);
+        var scene     = MakeScene(projectId, chapter.Id, "First Draft");
         var sut       = CreateSut();
 
-        _sectionRepo.Setup(r => r.GetByIdAsync(section.Id, default)).ReturnsAsync(section);
-        _sectionRepo.Setup(r => r.GetPublishedByProjectIdAsync(projectId, default))
-            .ReturnsAsync(new List<Section>());
+        _sectionRepo.Setup(r => r.GetByIdAsync(chapter.Id, default)).ReturnsAsync(chapter);
+        _sectionRepo.Setup(r => r.GetAllDescendantsAsync(chapter.Id, default))
+            .ReturnsAsync(new List<Section> { scene });
 
-        await sut.PublishAsync(section.Id, author.Id);
+        await sut.PublishChapterAsync(chapter.Id, Guid.NewGuid());
 
-        Assert.True(section.IsPublished);
+        Assert.True(chapter.IsPublished);
+        Assert.True(scene.IsPublished);
         _unitOfWork.Verify(u => u.SaveChangesAsync(default), Times.Once);
     }
 
     [Fact]
-    public async Task PublishAsync_SectionNotFound_ThrowsEntityNotFoundException()
+    public async Task PublishChapterAsync_SceneNotReady_ThrowsInvariantViolation()
+    {
+        var projectId = Guid.NewGuid();
+        var chapter   = MakeChapter(projectId);
+        var scene     = MakeScene(projectId, chapter.Id, "To Do");
+        var sut       = CreateSut();
+
+        _sectionRepo.Setup(r => r.GetByIdAsync(chapter.Id, default)).ReturnsAsync(chapter);
+        _sectionRepo.Setup(r => r.GetAllDescendantsAsync(chapter.Id, default))
+            .ReturnsAsync(new List<Section> { scene });
+
+        var ex = await Assert.ThrowsAsync<InvariantViolationException>(
+            () => sut.PublishChapterAsync(chapter.Id, Guid.NewGuid()));
+
+        Assert.Equal("I-CHAPTER-PUBLISH", ex.InvariantCode);
+    }
+
+    [Fact]
+    public async Task PublishChapterAsync_ChapterNotFound_ThrowsEntityNotFoundException()
     {
         var sut = CreateSut();
         var missingId = Guid.NewGuid();
@@ -57,70 +74,67 @@ public class PublicationServiceTests
             .ReturnsAsync((Section?)null);
 
         await Assert.ThrowsAsync<EntityNotFoundException>(
-            () => sut.PublishAsync(missingId, Guid.NewGuid()));
-    }
-
-    [Fact]
-    public async Task PublishAsync_FolderNode_ThrowsInvariantViolationException()
-    {
-        var sut     = CreateSut();
-        var section = Section.CreateFolder(Guid.NewGuid(), "UUID-1", "Chapter 1", null, 0);
-
-        _sectionRepo.Setup(r => r.GetByIdAsync(section.Id, default)).ReturnsAsync(section);
-
-        await Assert.ThrowsAsync<InvariantViolationException>(
-            () => sut.PublishAsync(section.Id, Guid.NewGuid()));
+            () => sut.PublishChapterAsync(missingId, Guid.NewGuid()));
     }
 
     // ---------------------------------------------------------------------------
-    // Unpublish
+    // UnpublishChapter
     // ---------------------------------------------------------------------------
 
     [Fact]
-    public async Task UnpublishAsync_PublishedSection_SetsIsPublishedFalse()
+    public async Task UnpublishChapterAsync_UnpublishesChapterAndScenes()
     {
         var projectId = Guid.NewGuid();
-        var section   = MakeDocument(projectId, published: true);
-        var sut       = CreateSut();
+        var chapter   = MakeChapter(projectId);
+        var scene     = MakeScene(projectId, chapter.Id, "First Draft");
+        chapter.MarkAsPublishedContainer();
+        scene.Publish("hash");
+        var sut = CreateSut();
 
-        _sectionRepo.Setup(r => r.GetByIdAsync(section.Id, default)).ReturnsAsync(section);
+        _sectionRepo.Setup(r => r.GetByIdAsync(chapter.Id, default)).ReturnsAsync(chapter);
+        _sectionRepo.Setup(r => r.GetAllDescendantsAsync(chapter.Id, default))
+            .ReturnsAsync(new List<Section> { scene });
 
-        await sut.UnpublishAsync(section.Id, Guid.NewGuid());
+        await sut.UnpublishChapterAsync(chapter.Id, Guid.NewGuid());
 
-        Assert.False(section.IsPublished);
-        _unitOfWork.Verify(u => u.SaveChangesAsync(default), Times.Once);
-    }
-
-    [Fact]
-    public async Task UnpublishAsync_SectionNotFound_ThrowsEntityNotFoundException()
-    {
-        var sut       = CreateSut();
-        var missingId = Guid.NewGuid();
-
-        _sectionRepo.Setup(r => r.GetByIdAsync(missingId, default))
-            .ReturnsAsync((Section?)null);
-
-        await Assert.ThrowsAsync<EntityNotFoundException>(
-            () => sut.UnpublishAsync(missingId, Guid.NewGuid()));
+        Assert.False(chapter.IsPublished);
+        Assert.False(scene.IsPublished);
     }
 
     // ---------------------------------------------------------------------------
-    // GetPublishedSections
+    // CanPublish
     // ---------------------------------------------------------------------------
 
     [Fact]
-    public async Task GetPublishedSectionsAsync_ReturnsPublishedSections()
+    public async Task CanPublishAsync_AllScenesReady_ReturnsTrue()
     {
         var projectId = Guid.NewGuid();
-        var sections  = new List<Section> { MakeDocument(projectId, published: true) };
+        var chapter   = MakeChapter(projectId);
+        var scene     = MakeScene(projectId, chapter.Id, "First Draft");
         var sut       = CreateSut();
 
-        _sectionRepo.Setup(r => r.GetPublishedByProjectIdAsync(projectId, default))
-            .ReturnsAsync(sections);
+        _sectionRepo.Setup(r => r.GetAllDescendantsAsync(chapter.Id, default))
+            .ReturnsAsync(new List<Section> { scene });
 
-        var result = await sut.GetPublishedSectionsAsync(projectId);
+        var result = await sut.CanPublishAsync(chapter.Id);
 
-        Assert.Single(result);
+        Assert.True(result);
+    }
+
+    [Fact]
+    public async Task CanPublishAsync_SceneNotReady_ReturnsFalse()
+    {
+        var projectId = Guid.NewGuid();
+        var chapter   = MakeChapter(projectId);
+        var scene     = MakeScene(projectId, chapter.Id, "To Do");
+        var sut       = CreateSut();
+
+        _sectionRepo.Setup(r => r.GetAllDescendantsAsync(chapter.Id, default))
+            .ReturnsAsync(new List<Section> { scene });
+
+        var result = await sut.CanPublishAsync(chapter.Id);
+
+        Assert.False(result);
     }
 }
 

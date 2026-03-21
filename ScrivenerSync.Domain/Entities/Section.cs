@@ -110,6 +110,34 @@ public sealed class Section
         ContentChangedSincePublish = false;
     }
 
+    /// <summary>
+    /// Marks a Folder section as a published container (e.g. a published chapter).
+    /// Unlike Publish(), this does not enforce the Document-only invariant.
+    /// </summary>
+    public void MarkAsPublishedContainer()
+    {
+        if (NodeType != Enumerations.NodeType.Folder)
+            throw new Exceptions.InvariantViolationException("I-CONTAINER",
+                "MarkAsPublishedContainer is only valid on Folder sections.");
+
+        if (IsSoftDeleted)
+            throw new Exceptions.InvariantViolationException("I-18",
+                "A soft-deleted section may not be published.");
+
+        IsPublished = true;
+        PublishedAt = DateTime.UtcNow;
+    }
+
+    /// <summary>
+    /// Marks a Folder section as unpublished container.
+    /// </summary>
+    public void UnmarkAsPublishedContainer()
+    {
+        if (NodeType != Enumerations.NodeType.Folder) return;
+        IsPublished   = false;
+        UnpublishedAt = DateTime.UtcNow;
+    }
+
     public void Unpublish()
     {
         if (!IsPublished)
@@ -176,3 +204,4 @@ public sealed class Section
                 "Section title must not be null or whitespace.");
     }
 }
+

@@ -1,6 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using ScrivenerSync.Domain.Entities;
 using ScrivenerSync.Domain.Enumerations;
 using ScrivenerSync.Domain.Interfaces.Repositories;
 using ScrivenerSync.Domain.Interfaces.Services;
@@ -24,27 +24,25 @@ public class AuthorController(
     // ---------------------------------------------------------------------------
     public async Task<IActionResult> Dashboard()
     {
-        var author   = await GetAuthorAsync();
+        var author = await GetAuthorAsync();
         if (author is null) return Forbid();
 
-        var projects  = await projectRepo.GetAllAsync();
-        var active    = await projectRepo.GetReaderActiveProjectAsync();
-        var published = active is not null
-            ? await sectionRepo.GetPublishedByProjectIdAsync(active.Id)
-            : new List<Domain.Entities.Section>();
+        var projects         = await projectRepo.GetAllAsync();
+        var active           = await projectRepo.GetReaderActiveProjectAsync();
+        var publishedChapters = active is not null
+            ? await publicationService.GetPublishedChaptersAsync(active.Id)
+            : new List<Section>();
         var failures  = await dashboardService.GetEmailHealthSummaryAsync();
         var readers   = await userRepo.GetAllBetaReadersAsync();
 
-        var vm = new DashboardViewModel
+        return View(new DashboardViewModel
         {
-            ActiveProject    = active,
-            AllProjects      = projects,
-            PublishedSections = published,
-            EmailFailures    = failures,
+            ActiveProject     = active,
+            AllProjects       = projects,
+            PublishedSections = publishedChapters,
+            EmailFailures     = failures,
             ActiveReaderCount = readers.Count(r => r.IsActive && !r.IsSoftDeleted)
-        };
-
-        return View(vm);
+        });
     }
 
     // ---------------------------------------------------------------------------
@@ -77,7 +75,6 @@ public class AuthorController(
         var project = await projectRepo.GetByIdAsync(projectId);
         if (project is null) return NotFound();
 
-        // Deactivate any currently active project
         var current = await projectRepo.GetReaderActiveProjectAsync();
         if (current is not null && current.Id != projectId)
             current.DeactivateForReaders();
@@ -104,30 +101,61 @@ public class AuthorController(
     }
 
     // ---------------------------------------------------------------------------
-    // Publication
+    // Sections list with chapter publish buttons
+    // ---------------------------------------------------------------------------
+    public async Task<IActionResult> Sections(Guid projectId)
+    {
+        var project = await projectRepo.GetByIdAsync(projectId);
+        if (project is null) return NotFound();
+
+        var sections = await sectionRepo.GetByProjectIdAsync(projectId);
+        var sorted   = SortDepthFirst(sections);
+
+        // Pre-compute which folders can be published
+        var publishable = new HashSet<Guid>();
+        foreach (var (s, _) in sorted.Where(x => x.Section.NodeType == NodeType.Folder))
+        {
+            if (await publicationService.CanPublishAsync(s.Id))
+                publishable.Add(s.Id);
+        }
+
+        ViewBag.Project    = project;
+        ViewBag.Publishable = publishable;
+        return View(sorted);
+    }
+
+    // ---------------------------------------------------------------------------
+    // Chapter publish / unpublish
     // ---------------------------------------------------------------------------
     [HttpPost]
     [ValidateAntiForgeryToken]
-    public async Task<IActionResult> Publish(Guid sectionId)
+    public async Task<IActionResult> PublishChapter(Guid chapterId, Guid projectId)
     {
         var author = await GetAuthorAsync();
         if (author is null) return Forbid();
 
-        await publicationService.PublishAsync(sectionId, author.Id);
-        TempData["Success"] = "Section published.";
-        return RedirectToAction("Dashboard");
+        try
+        {
+            await publicationService.PublishChapterAsync(chapterId, author.Id);
+            TempData["Success"] = "Chapter published.";
+        }
+        catch (Exception ex)
+        {
+            TempData["Error"] = ex.Message;
+        }
+        return RedirectToAction("Sections", new { projectId });
     }
 
     [HttpPost]
     [ValidateAntiForgeryToken]
-    public async Task<IActionResult> Unpublish(Guid sectionId)
+    public async Task<IActionResult> UnpublishChapter(Guid chapterId, Guid projectId)
     {
         var author = await GetAuthorAsync();
         if (author is null) return Forbid();
 
-        await publicationService.UnpublishAsync(sectionId, author.Id);
-        TempData["Success"] = "Section unpublished.";
-        return RedirectToAction("Dashboard");
+        await publicationService.UnpublishChapterAsync(chapterId, author.Id);
+        TempData["Success"] = "Chapter unpublished.";
+        return RedirectToAction("Sections", new { projectId });
     }
 
     // ---------------------------------------------------------------------------
@@ -153,9 +181,8 @@ public class AuthorController(
 
         try
         {
-            var policy  = model.NeverExpires ? ExpiryPolicy.AlwaysOpen : ExpiryPolicy.ExpiresAt;
-            await userService.IssueInvitationAsync(
-                model.Email, policy, model.ExpiresAt, author.Id);
+            var policy = model.NeverExpires ? ExpiryPolicy.AlwaysOpen : ExpiryPolicy.ExpiresAt;
+            await userService.IssueInvitationAsync(model.Email, policy, model.ExpiresAt, author.Id);
             TempData["Success"] = $"Invitation sent to {model.Email}.";
             return RedirectToAction("Readers");
         }
@@ -179,75 +206,32 @@ public class AuthorController(
     }
 
     // ---------------------------------------------------------------------------
-    // Section detail with comments
+    // Section detail with comments (author view)
     // ---------------------------------------------------------------------------
     public async Task<IActionResult> Section(Guid id)
     {
-        var author  = await GetAuthorAsync();
+        var author = await GetAuthorAsync();
         if (author is null) return Forbid();
 
-        var section  = await sectionRepo.GetByIdAsync(id);
-        if (section is null) return NotFound();
+        var s = await sectionRepo.GetByIdAsync(id);
+        if (s is null) return NotFound();
 
         var comments = await GetCommentService().GetThreadsForSectionAsync(id, author.Id);
         var events   = await GetReadEventRepo().GetBySectionIdAsync(id);
 
         return View(new SectionViewModel
         {
-            Section   = section,
+            Section   = s,
             Comments  = comments,
             ReadCount = events.Count
         });
     }
 
     // ---------------------------------------------------------------------------
-    // All sections
-    // ---------------------------------------------------------------------------
-    public async Task<IActionResult> Sections(Guid projectId)
-    {
-        var project = await projectRepo.GetByIdAsync(projectId);
-        if (project is null) return NotFound();
-
-        var sections = await sectionRepo.GetByProjectIdAsync(projectId);
-        ViewBag.Project = project;
-        return View(sections);
-    }
-
-    [HttpPost]
-    [ValidateAntiForgeryToken]
-    public async Task<IActionResult> PublishSection(Guid sectionId, Guid projectId)
-    {
-        var author = await GetAuthorAsync();
-        if (author is null) return Forbid();
-
-        try
-        {
-            await publicationService.PublishAsync(sectionId, author.Id);
-            TempData["Success"] = "Section published.";
-        }
-        catch (Exception ex)
-        {
-            TempData["Error"] = ex.Message;
-        }
-        return RedirectToAction("Sections", new { projectId });
-    }
-
-    [HttpPost]
-    [ValidateAntiForgeryToken]
-    public async Task<IActionResult> UnpublishSection(Guid sectionId, Guid projectId)
-    {
-        var author = await GetAuthorAsync();
-        if (author is null) return Forbid();
-
-        await publicationService.UnpublishAsync(sectionId, author.Id);
-        TempData["Success"] = "Section unpublished.";
-        return RedirectToAction("Sections", new { projectId });
-    }
-
-    // ---------------------------------------------------------------------------
     // Private helpers
     // ---------------------------------------------------------------------------
-    private async Task<Domain.Entities.User?> GetAuthorAsync() =>
+
+    private async Task<User?> GetAuthorAsync() =>
         await userRepo.GetAuthorAsync();
 
     private IUnitOfWork GetUnitOfWork() =>
@@ -258,5 +242,37 @@ public class AuthorController(
 
     private IReadEventRepository GetReadEventRepo() =>
         HttpContext.RequestServices.GetRequiredService<IReadEventRepository>();
-}
 
+    private static IReadOnlyList<(Section Section, int Depth)> SortDepthFirst(
+        IReadOnlyList<Section> sections)
+    {
+        var root   = Guid.Empty;
+        var lookup = new Dictionary<Guid, List<Section>>();
+
+        foreach (var s in sections)
+        {
+            var key = s.ParentId ?? root;
+            if (!lookup.ContainsKey(key))
+                lookup[key] = new List<Section>();
+            lookup[key].Add(s);
+        }
+
+        foreach (var key in lookup.Keys.ToList())
+            lookup[key] = lookup[key].OrderBy(s => s.SortOrder).ToList();
+
+        var result = new List<(Section, int)>();
+
+        void Walk(Guid parentId, int depth)
+        {
+            if (!lookup.TryGetValue(parentId, out var children)) return;
+            foreach (var child in children)
+            {
+                result.Add((child, depth));
+                Walk(child.Id, depth + 1);
+            }
+        }
+
+        Walk(root, 0);
+        return result;
+    }
+}

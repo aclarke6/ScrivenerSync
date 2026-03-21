@@ -2,11 +2,42 @@ using ScrivenerSync.Domain.Entities;
 
 namespace ScrivenerSync.Web.Models;
 
-public class ReadingViewModel
+public class TopLevelViewModel
 {
-    public Section Section { get; set; } = default!;
+    public IReadOnlyList<Section> TopLevelSections { get; set; } = new List<Section>();
+    public string ProjectName { get; set; } = string.Empty;
+}
+
+public class SectionContentsViewModel
+{
+    public Section TopLevelSection { get; set; } = default!;
+    public IReadOnlyList<ContentGroup> Groups { get; set; } = new List<ContentGroup>();
+    public string ProjectName { get; set; } = string.Empty;
+}
+
+public class ContentGroup
+{
+    public string Heading { get; set; } = string.Empty;
+    public int Depth { get; set; }
+    public Section? ChapterSection { get; set; }
+    public IReadOnlyList<Section> Scenes { get; set; } = new List<Section>();
+    public IReadOnlyList<ContentGroup> SubGroups { get; set; } = new List<ContentGroup>();
+}
+
+public class ChapterReadViewModel
+{
+    public Section Chapter { get; set; } = default!;
+    public IReadOnlyList<string> Breadcrumb { get; set; } = new List<string>();
+    public IReadOnlyList<SceneWithComments> Scenes { get; set; } = new List<SceneWithComments>();
+    public IReadOnlyList<Comment> ChapterComments { get; set; } = new List<Comment>();
+    public SectionContentsViewModel? BookContents { get; set; }
+    public string ProjectName { get; set; } = string.Empty;
+}
+
+public class SceneWithComments
+{
+    public Section Scene { get; set; } = default!;
     public IReadOnlyList<Comment> Comments { get; set; } = new List<Comment>();
-    public IReadOnlyList<Section> TableOfContents { get; set; } = new List<Section>();
 }
 
 public class AddCommentViewModel

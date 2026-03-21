@@ -1,0 +1,30 @@
+@model IReadOnlyList<ContentGroup>
+
+@foreach (var group in Model)
+{
+    <div style="margin-top: @(group.Depth == 0 ? "20px" : "12px");
+                margin-left: @(group.Depth * 16)px;">
+
+        @if (!string.IsNullOrEmpty(group.Heading))
+        {
+            <h4 style="font-size:@(group.Depth == 0 ? "1.05em" : "0.95em"); color:#444;
+                       border-bottom:1px solid #eee; padding-bottom:4px; margin:0 0 10px 0;">
+                @group.Heading
+            </h4>
+        }
+
+        @if (group.ChapterSection is not null)
+        {
+            <div style="margin-bottom:10px; padding-left:12px;">
+                <a asp-controller="Reader" asp-action="Read"
+                   asp-route-id="@group.ChapterSection.Id"
+                   style="font-size:1em;">@group.ChapterSection.Title</a>
+            </div>
+        }
+
+        @if (group.SubGroups.Any())
+        {
+            @await Html.PartialAsync("_ContentGroups", group.SubGroups)
+        }
+    </div>
+}
