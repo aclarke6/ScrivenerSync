@@ -1,3 +1,21 @@
 <Solution>
+  <Folder Name="/Docs/">
+    <File Path="ScrivenerSync-BusinessModel.docx" />
+  </Folder>
+  <Folder Name="/Solution Items/">
+    <File Path=".gitignore" />
+    <File Path="Copy-SourceFiles.ps1" />
+    <File Path="Get-CodeFiles.ps1" />
+    <File Path="setup-packages.ps1" />
+    <File Path="Show-ProjectTree.ps1" />
+  </Folder>
+  <Folder Name="/Tests/">
+    <Project Path="ScrivenerSync.Application.Tests/ScrivenerSync.Application.Tests.csproj" />
+    <Project Path="ScrivenerSync.Domain.Tests/ScrivenerSync.Domain.Tests.csproj" />
+    <Project Path="ScrivenerSync.Infrastructure.Tests/ScrivenerSync.Infrastructure.Tests.csproj" />
+  </Folder>
+  <Project Path="ScrivenerSync.Application/ScrivenerSync.Application.csproj" />
   <Project Path="ScrivenerSync.Domain/ScrivenerSync.Domain.csproj" />
+  <Project Path="ScrivenerSync.Infrastructure/ScrivenerSync.Infrastructure.csproj" />
+  <Project Path="ScrivenerSync.Web/ScrivenerSync.Web.csproj" />
 </Solution>
