@@ -4,7 +4,8 @@ using ScrivenerSync.Domain.Interfaces.Repositories;
 
 namespace ScrivenerSync.Infrastructure.Persistence;
 
-public class ScrivenerSyncDbContext : DbContext, IUnitOfWork
+public class ScrivenerSyncDbContext(DbContextOptions<ScrivenerSyncDbContext> options)
+    : DbContext(options), IUnitOfWork
 {
     public DbSet<User> Users { get; set; } = default!;
     public DbSet<Invitation> Invitations { get; set; } = default!;
@@ -14,9 +15,6 @@ public class ScrivenerSyncDbContext : DbContext, IUnitOfWork
     public DbSet<ReadEvent> ReadEvents { get; set; } = default!;
     public DbSet<UserNotificationPreferences> NotificationPreferences { get; set; } = default!;
     public DbSet<EmailDeliveryLog> EmailDeliveryLogs { get; set; } = default!;
-
-    public ScrivenerSyncDbContext(DbContextOptions<ScrivenerSyncDbContext> options)
-        : base(options) { }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
